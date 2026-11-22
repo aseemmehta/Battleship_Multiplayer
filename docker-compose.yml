@@ -1,0 +1,64 @@
+# Battleship platform: db + api + gateway + frontend. Start with:  docker compose up --build
+# No sudo, no privileged containers, no host networking, no fixed IPs.
+
+name: battleship
+
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-battleship}
+      POSTGRES_USER: ${POSTGRES_USER:-battleship}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-battleship}
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+    networks: [data]
+    restart: unless-stopped
+    # No "ports": only the API can reach the database.
+
+  api:
+    build: ./api
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://db:5432/${POSTGRES_DB:-battleship}
+      SPRING_DATASOURCE_USERNAME: ${POSTGRES_USER:-battleship}
+      SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD:-battleship}
+    depends_on:
+      db:
+        condition: service_healthy
+    networks: [data, edge]
+    restart: unless-stopped
+    # No "ports": phones reach the API through the gateway.
+
+  gateway:
+    build: ./gateway
+    environment:
+      API_URL: http://api:8081
+    depends_on:
+      - api
+    ports:
+      - "${GATEWAY_PORT:-9090}:9090"   # what the browser/phone calls
+    networks: [edge]
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        VITE_API_BASE: ${VITE_API_BASE:-}
+        VITE_GATEWAY_PORT: ${GATEWAY_PORT:-9090}
+    ports:
+      - "${FRONTEND_PORT:-3000}:9090"  # open http://<your-LAN-IP>:3000 on the phone
+    networks: [edge]
+    restart: unless-stopped
+
+networks:
+  data: {}   # db <-> api
+  edge: {}   # api <-> gateway, frontend
+
+volumes:
+  db-data: {}

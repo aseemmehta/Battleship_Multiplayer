@@ -1,0 +1,30 @@
+server:
+  port: 9090
+
+spring:
+  application:
+    name: battleship-gateway
+  cloud:
+    gateway:
+      globalcors:
+        cors-configurations:
+          '[/**]':
+            # the React app is served from another port (and, on your LAN, another origin per device IP)
+            allowedOriginPatterns: "*"
+            allowedMethods: [GET, POST, PUT, DELETE, OPTIONS]
+            allowedHeaders: "*"
+            maxAge: 3600
+      default-filters:
+        # let the API (and Swagger UI) see the host:port the phone really used
+        - PreserveHostHeader
+      routes:
+        - id: battleship-api
+          uri: ${API_URL:http://localhost:8081}
+          predicates:
+            - Path=/api/**,/swagger-ui.html,/swagger-ui/**,/v3/api-docs/**
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health
