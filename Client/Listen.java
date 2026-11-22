@@ -25,66 +25,64 @@ public class Listen implements Runnable {
 
 // Based on the commands changes the status of the game
    public void program(String msg,String packAddress){
-     if(msg.substring(0,7).equals("Code:03")){
-       // Code:03 signifies Message received from Player 1
-       Sender.address = packAddress;
-       Sender.status = 1;
-       Sender.status = 2;
-       Game.player = 2;
-     }else if(msg.substring(0,7).equals("Code:02")){
+     if(msg.startsWith("Code:03")){
+       // Code:03 signifies Message received from Player 1, we are Player 2
+       if(Game.state.get()==Game.State.SEARCHING){
+         Sender.address = packAddress;
+         Game.player = 2;
+         Game.state.set(Game.State.PAIRED);
+       }
+     }else if(msg.startsWith("Code:02")){
        // Code:02 signifies message received from Server, IP information about Player 2
-       p2 = msg.substring(7);
-       Sender.address = p2;
-       Sender.status = 1;
-       Game.player = 1;
-     }else if(msg.substring(0,7).equals("Code:04")){
-       // Code:04 signifies Opponent is ready and checks if own machine is Ready
-       // to play the game
-       double t = System.currentTimeMillis();
-       while(System.currentTimeMillis() - t<60000 && Game.ownStatus==0){
-         System.out.print("");
-         // Timer to wait for 60 Sec or till the Status is changed
+       if(Game.state.get()==Game.State.SEARCHING){
+         p2 = msg.substring(7);
+         Sender.address = p2;
+         Game.player = 1;
+         Game.state.set(Game.State.PAIRED);
        }
-       if(Game.ownStatus<3){
-         System.out.println("Took too long");
-       }else{
-         Game.status = 4;
-         try{
-           if(Game.ownStatus==4){
-             Sender.sendMessage("Code:04");
-           }
-         }catch(Exception e){
-           e.printStackTrace();
-         }
-       }
-     }else if(msg.substring(0,7).equals("Code:05")){
+     }else if(msg.startsWith("Code:04")){
+       // Code:04 signifies Opponent is ready. Only remember it here, Game decides when to start,
+       // so this thread is never blocked and no reply is needed (both sides send Code:04).
+       Game.oppReady = true;
+     }else if(msg.startsWith("Code:05")){
        // Code:05 signifies Opponent made their move
+       Game.State current = Game.state.get();
+       if(current != Game.State.READY && current != Game.State.OPPONENT_TURN){
+         return; // late or duplicate shot, not our turn to be shot at
+       }
        int row = Integer.parseInt(msg.substring(7,8));
        int col = Integer.parseInt(msg.substring(8,9));
-       if(Game.matrix[row][col].equals(" X")){
-         Game.matrix[row][col] = "MM";
-         System.out.println("Miss at "+row+col);
-       }else{
+       String cell = Game.matrix[row][col];
+       if(cell.startsWith("S")){
          Game.matrix[row][col] = "HH";
          Game.OppScore++;
          System.out.println("Hit at "+row+col);
+       }else if(cell.equals(" X")){
+         Game.matrix[row][col] = "MM";
+         System.out.println("Miss at "+row+col);
        }
        try{
-         Game.status = 5;
          Sender.sendMessage("Code:07"+row+col+Game.matrix[row][col]);
        }catch(Exception e){
          e.printStackTrace();
        }
+       // All ships hit: we lose right now, we do not wait for our next turn
+       Game.State next = Game.OppScore>=Game.TOTAL_SHIP_CELLS ? Game.State.LOST : Game.State.MY_TURN;
+       Game.state.compareAndSet(current, next);
      }
-     else if(msg.substring(0,7).equals("Code:07")){
+     else if(msg.startsWith("Code:07")){
        // Code:07 returns if the move was a Hit or a Miss
+       if(Game.state.get()!=Game.State.AWAITING_RESULT){
+         return; // late or duplicate result
+       }
        int row = Integer.parseInt(msg.substring(7,8));
        int col = Integer.parseInt(msg.substring(8,9));
        Game.otherMatrix[row][col] = msg.substring(9);
-       Game.status = 7;
        if(msg.substring(9).equals("HH")){
          Game.score++;
        }
+       Game.State next = Game.score>=Game.TOTAL_SHIP_CELLS ? Game.State.WON : Game.State.OPPONENT_TURN;
+       Game.state.compareAndSet(Game.State.AWAITING_RESULT, next);
      }
    }
 

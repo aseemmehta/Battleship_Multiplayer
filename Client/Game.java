@@ -7,17 +7,59 @@ and it also contains the information on who plays and what.
 
 import java.lang.*;
 import java.util.Scanner;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.BooleanSupplier;
 
 
 public class Game {
+  // Every state a client can be in. Sender moves the client out of SEARCHING,
+  // Listen reacts to network messages, Game handles user input and timeouts.
+  public enum State {
+    SEARCHING, PAIRED, PLACING_SHIPS, READY,
+    MY_TURN, AWAITING_RESULT, OPPONENT_TURN,
+    WON, LOST, TIMEOUT, OPPONENT_NOT_READY, NO_OPPONENT
+  }
+
   private static int grid = 10;
+  private static final int NO_OF_SHIPS = 3;
+  // Ships have sizes 3, 4 and 5, so a player wins by hitting every one of the 12 ship cells
+  public static final int TOTAL_SHIP_CELLS = totalShipCells(NO_OF_SHIPS);
+  // How long we wait for the opponent (ready signal, result, next move)
+  public static volatile int timeoutMs = 60000;
+
   public static String[][] otherMatrix = new String[grid][grid];
   public static String[][] matrix = new String[grid][grid];
-  public static int player;
-  public static int status; //4 for player ready, 5 to make Move, 6 to wait
-  public static int ownStatus = 3;
-  public static int score = 0;
-  public static int OppScore = 0;
+  public static volatile int player;          // 1 = starts, 2 = waits for first shot
+  public static final AtomicReference<State> state = new AtomicReference<State>(State.SEARCHING);
+  public static volatile boolean oppReady = false; // set by Listen on Code:04
+  public static volatile int score = 0;       // hits I made on the opponent
+  public static volatile int OppScore = 0;    // hits the opponent made on me
+
+  // Sum of ship sizes: ship n has size 2+n
+  public static int totalShipCells(int noOfShips){
+    int total = 0;
+    for(int ship=1; ship<=noOfShips; ship++){
+      total += 2+ship;
+    }
+    return total;
+  }
+
+  // Polls a condition until it is true or the time runs out. Returns true if the condition became true.
+  public static boolean waitFor(BooleanSupplier condition, long millis){
+    long end = System.currentTimeMillis() + millis;
+    while(!condition.getAsBoolean()){
+      if(System.currentTimeMillis() >= end){
+        return false;
+      }
+      try{
+        Thread.sleep(50);
+      }catch(InterruptedException e){
+        Thread.currentThread().interrupt();
+        return false;
+      }
+    }
+    return true;
+  }
 
 // To make it easy on the player old screen is cleared
   public static void clearScreen() {
@@ -168,107 +210,108 @@ public class Game {
       return true;
     }
 
-// function allows the correct player to make a move and restricts opponent to wait
-  public static void move(Scanner input){
+// Prints both boards and the current score
+  public static void showBoard(){
+    PrintMatrix(matrix,otherMatrix);
+    System.out.println("My Score: "+ score +" / "+ TOTAL_SHIP_CELLS);
+    System.out.println("Opponent Score: "+ OppScore +" / "+ TOTAL_SHIP_CELLS);
+  }
+
+  // Asks the player for a cell that has not been shot at yet
+  public static int[] readShot(Scanner input){
     while(true){
-      System.out.print("");
-      if(Game.status == 5){
-        PrintMatrix(matrix,otherMatrix);
-        int row;
-        int col;
-        System.out.println("Your Move");
-        while(true){
-          try{
-            System.out.print("Enter hit row: ");
-            row = input.nextInt();
-            System.out.print("Enter hit column: ");
-            col = input.nextInt();
-            if(row>=0 && row < otherMatrix.length && col>=0 && col<otherMatrix[row].length && otherMatrix[row][col].equals(" X")) {
-              break;
-            }else{
-              System.out.println("Enter Again");
-            }
-          }catch(Exception e){
-            input.next();
-            System.out.println("Enter Again");
-          }
+      try{
+        System.out.print("Enter hit row: ");
+        int row = input.nextInt();
+        System.out.print("Enter hit column: ");
+        int col = input.nextInt();
+        if(row>=0 && row < otherMatrix.length && col>=0 && col<otherMatrix[row].length && otherMatrix[row][col].equals(" X")) {
+          return new int[]{row, col};
+        }else{
+          System.out.println("Enter Again");
         }
-        String output = "Code:05"+row+col;
-        if(Game.OppScore>=7){
-          System.out.println("You Lose!");
-          break;
-        }
-        try{
-          Sender.sendMessage(output);
-          Game.status = 6;
-          double t = System.currentTimeMillis();
-          while(System.currentTimeMillis() - t<60000 && Game.status==6){
-            System.out.print("");
-          }
-          if(Game.status ==7){
-            Game.status = 6;
-            PrintMatrix(matrix,otherMatrix);
-          }else{
-            System.out.println("Opponent took too long");
-            break;
-          }
-          System.out.println("My Score: "+ Game.score);
-          System.out.println("Opponent Score: "+ Game.OppScore);
-          if(Game.score>=7){
-            System.out.println("Winner!");
-            break;
-          }
-          t = System.currentTimeMillis();
-          while(System.currentTimeMillis() - t<60000 && Game.status==6){
-            System.out.print("");
-          }
-        }catch(Exception e){
-          e.printStackTrace();
-        }
+      }catch(Exception e){
+        input.next();
+        System.out.println("Enter Again");
       }
     }
   }
 
-  // Starts a timeout timer for the user
-  public static void otherPlayerWait(){
-    double t = System.currentTimeMillis();
-    while(System.currentTimeMillis() - t<60000 && Game.status!=4){
-      System.out.print("");
-    }
-    if(Game.status==4 &&Game.ownStatus>2){
-      if(player==1){
-        Game.status = 5;
-      }else if(player==2){
-        Game.status = 6;
+// Main game loop. Runs until the state machine reaches WON, LOST or TIMEOUT.
+// The Listen thread makes the transitions caused by network messages.
+  public static void move(Scanner input){
+    while(true){
+      State s = state.get();
+      switch(s){
+        case MY_TURN: {
+          showBoard();
+          System.out.println("Your Move");
+          int[] shot = readShot(input);
+          // Change state BEFORE sending, so a fast Code:07 reply can not be overwritten
+          state.set(State.AWAITING_RESULT);
+          try{
+            Sender.sendMessage("Code:05"+shot[0]+shot[1]);
+          }catch(Exception e){
+            e.printStackTrace();
+          }
+          break;
+        }
+        case AWAITING_RESULT:
+          // Listen moves us on when Code:07 arrives (OPPONENT_TURN, or WON on the last hit)
+          if(!waitFor(() -> state.get()!=State.AWAITING_RESULT, timeoutMs)){
+            state.compareAndSet(State.AWAITING_RESULT, State.TIMEOUT);
+          }
+          break;
+        case OPPONENT_TURN:
+          showBoard();
+          // Listen moves us on when Code:05 arrives (MY_TURN, or LOST on the last hit)
+          if(!waitFor(() -> state.get()!=State.OPPONENT_TURN, timeoutMs)){
+            state.compareAndSet(State.OPPONENT_TURN, State.TIMEOUT);
+          }
+          break;
+        case WON:
+          showBoard();
+          System.out.println("Winner!");
+          return;
+        case LOST:
+          showBoard();
+          System.out.println("You Lose!");
+          return;
+        case TIMEOUT:
+          System.out.println("Opponent took too long");
+          return;
+        default:
+          return;
       }
-    }else{
-      System.out.println("Opponent not ready");
     }
   }
 
 // Starts the game
   public static void playGAME(){
     Scanner input = new Scanner(System.in);
-    int noOfShips = 3;
+    state.set(State.PLACING_SHIPS);
     matrix = initializeGame(matrix);
     otherMatrix = initializeGame(otherMatrix);
     System.out.println("Game Initialized");
     PrintMatrix(matrix,otherMatrix);
-    matrix = assignShips(matrix,noOfShips,otherMatrix, input);
+    matrix = assignShips(matrix,NO_OF_SHIPS,otherMatrix, input);
     System.out.println("Ready, Informing other player");
-    Game.ownStatus = 3;
+    state.set(State.READY);
     try{
       Sender.sendMessage("Code:04");
     }catch(Exception e){
       e.printStackTrace();
     }
-    otherPlayerWait();
-    System.out.println("Game Status: "+Game.status);
-    if(Game.status!=0){
+    // Wait for the opponent's Code:04 (or for their first shot, which also proves they are ready)
+    boolean opponentReady = waitFor(() -> oppReady || state.get()!=State.READY, timeoutMs);
+    if(opponentReady){
+      // Player 1 shoots first. compareAndSet keeps a first shot that Listen already handled.
+      state.compareAndSet(State.READY, player==1 ? State.MY_TURN : State.OPPONENT_TURN);
       move(input);
       System.out.println("Game Over");
     }else{
-      System.out.println("Exit");
+      state.set(State.OPPONENT_NOT_READY);
+      System.out.println("Opponent not ready");
     }
     input.close();
   }
