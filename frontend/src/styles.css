@@ -1,0 +1,76 @@
+:root {
+  color-scheme: dark;
+  --bg: #0b1d33;
+  --panel: #12304f;
+  --water: #1d4f7a;
+  --text: #e8f1fa;
+  --accent: #35c2a1;
+  --hit: #e5484d;
+  --miss: #8fa7bd;
+  --ship: #6b7f93;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 16px/1.4 system-ui, -apple-system, 'Segoe UI', sans-serif;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.app {
+  max-width: 480px;
+  margin: 0 auto;
+  padding: max(16px, env(safe-area-inset-top)) 16px max(24px, env(safe-area-inset-bottom));
+}
+
+h1 { margin: 0 0 12px; font-size: 1.6rem; }
+h2 { margin: 18px 0 8px; font-size: 1rem; opacity: 0.85; }
+
+.card { background: var(--panel); border-radius: 12px; padding: 16px; display: grid; gap: 10px; }
+
+input, button {
+  font: inherit;
+  min-height: 44px;
+  border-radius: 10px;
+  border: 1px solid #2c5a86;
+  background: #0f2742;
+  color: var(--text);
+  padding: 8px 14px;
+  touch-action: manipulation;
+}
+input { width: 100%; }
+button:disabled { opacity: 0.45; }
+button.primary { background: var(--accent); color: #04261e; border: 0; font-weight: 700; width: 100%; margin-top: 12px; }
+button.link { background: none; border: 0; text-decoration: underline; margin-top: 16px; }
+
+.row { display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0; }
+.chip.on { outline: 2px solid var(--accent); }
+.chip.done { opacity: 0.8; }
+
+.status { font-weight: 700; margin: 8px 0; }
+.status.go { color: var(--accent); }
+.hint { opacity: 0.7; font-size: 0.85rem; margin: 6px 0; }
+.error { color: #ff9aa0; }
+
+.grid { display: grid; gap: 2px; }
+.grid.small { max-width: 260px; }
+.cell {
+  aspect-ratio: 1;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 3px;
+  background: var(--water);
+  color: #fff;
+  font-size: 0.9rem;
+  line-height: 1;
+}
+.cell.ship { background: var(--ship); }
+.cell.hit { background: var(--hit); }
+.cell.sunk { background: #8a1c20; }
+.cell.miss { background: #2a5d88; color: var(--miss); }
+.cell.selected { outline: 3px solid var(--accent); outline-offset: -3px; }
+.cell:disabled { opacity: 1; }

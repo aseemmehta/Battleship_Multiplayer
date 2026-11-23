@@ -1,0 +1,38 @@
+server:
+  port: 8081
+  shutdown: graceful
+
+spring:
+  application:
+    name: battleship-api
+  datasource:
+    # overridden by SPRING_DATASOURCE_* variables in docker-compose.yml
+    url: jdbc:postgresql://localhost:5432/battleship
+    username: battleship
+    password: battleship
+    hikari:
+      maximum-pool-size: 10
+  jpa:
+    open-in-view: false            # no lazy loading in the web layer; the service builds the whole view
+    hibernate:
+      ddl-auto: validate           # Flyway owns the schema, Hibernate only checks that it matches
+    properties:
+      hibernate:
+        default_batch_fetch_size: 16   # lazy collections are loaded in batches (no N+1 queries)
+  flyway:
+    enabled: true
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health
+
+battleship:
+  timeouts:
+    waiting-seconds: 600       # nobody joined
+    placing-seconds: 600       # a player never finished placing ships
+    turn-seconds: 120          # player whose turn it is does not move: forfeit
+    keep-finished-seconds: 86400
+  janitor:
+    interval-ms: 15000
