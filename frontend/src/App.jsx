@@ -17,7 +17,7 @@ export default function App() {
 
   return (
     <main className="app">
-      <h1>Battleship</h1>
+      <h1 className={session ? 'brand small' : 'brand'}>Battleship</h1>
       {session ? (
         <GameScreen key={session.gameId} session={session} onLeave={leave} />
       ) : (
